@@ -174,6 +174,64 @@ func exchangeTimestamps(f *os.File) {
 	calculateDelayRTT(t0,t1,t2,t3)
 }
 
+func timer2(c2 chan string) {
+	C.init_perfcounters (1, 0);
+	start := time.Now()
+	t := C.get_cyclecount()
+	for {
+		t1 := C.get_cyclecount() - t;
+		if t1 > 20000000 {
+			elapsed := time.Since(start)
+			c2 <- "result 2"
+			fmt.Printf("time elapsed %s\n", elapsed)
+			break
+		}
+	}
+}
+
+func timer1 (c1 chan string) {
+	//t = C.get_cyclecount();
+	//timer := time.NewTimer(time.Millisecond*2)
+	//<- timer.C
+	start := time.Now()
+	time.Sleep(time.Millisecond*10)
+	elapsed := time.Since(start)
+	//t = C.get_cyclecount() - t;
+	c1 <- "result 1"
+	fmt.Printf("time elapsed %s\n", elapsed)
+	//fmt.Printf("Waiting 2 ms took exactly %d cycles and overhead of get_cyclecount() was %d cycles\n", t - overhead, overhead);
+}
+
+func priority_test() {
+	// init counters:
+	C.init_perfcounters (1, 0); 
+
+	// measure the counting overhead:
+	overhead := C.get_cyclecount();
+	overhead = C.get_cyclecount() - overhead;    
+
+	t := C.get_cyclecount();
+
+	fmt.Println("test data to benchmark Println function call")	
+
+	t = C.get_cyclecount() - t;
+
+	fmt.Printf("Println took exactly %d cycles and overhead of get_cyclecount() was %d cycles\n", t - overhead, overhead);
+	
+	c1 := make (chan string, 1)
+	c2 := make (chan string, 1)
+	go timer1(c1)
+	go timer2(c2)
+	select {
+	case res := <-c1:
+		fmt.Println(res)
+	case res := <-c2:
+		fmt.Println(res)
+	//case <-time.After(time.Millisecond*1):
+		//fmt.Println("timeout 1")
+	}
+}
+
 func main() {
 	f, err := openPort("/dev/ttyUSB0")
 	if err != nil {
