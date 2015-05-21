@@ -42,6 +42,7 @@ import "os"
 import "syscall"
 import "unsafe"
 import "time"
+import "strconv"
 
 var gClockOffset time.Duration
 var gDelayRTT time.Duration
@@ -181,13 +182,19 @@ func waitTimer(cycles int) int {
 	return int(timeElapsed)
 }
 
+func priority_test(f *os.File) {
+	str := readMessage(f)
+	cycles, _ := strconv.Atoi(str)
+	waitTimer(cycles)
+	writeMessage(f, fmt.Sprintf("%27s", "COMPLETE"))
+}
+
 func main() {
 	f, err := openPort("/dev/ttyUSB0")
 	if err != nil {
 		fmt.Printf("Failed to open the serial port!")
 	}
 	exchangeTimestamps(f)
-	timeElapsed := waitTimer(2000)
-	fmt.Printf("Endpoint waited %v cycles\n", timeElapsed)
+	priority_test(f)
 	f.Close()
 }
