@@ -89,14 +89,13 @@ func openPort(name string) (f *os.File, err error) {
 	return f, nil
 }
 
-
 func generateTimestamp() string {
 	t := time.Now()
 	return t.Format(timeStampLayout)
 }
 
 func parseTimestamp(timestamp string) time.Time {
-	t, e := time.Parse(timeStampLayout,timestamp)
+	t, e := time.Parse(timeStampLayout, timestamp)
 	if e != nil {
 		fmt.Printf("Parse error occured: %v\n", e)
 	}
@@ -109,7 +108,7 @@ func calculateClockOffset(p0 string, p1 string, p2 string, p3 string) time.Durat
 	t1 := parseTimestamp(p1)
 	t2 := parseTimestamp(p2)
 	t3 := parseTimestamp(p3)
-	fmt.Printf("t0: %v \nt1: %v \nt2: %v \nt3: %v\n", t0,t1,t2,t3)
+	fmt.Printf("t0: %v \nt1: %v \nt2: %v \nt3: %v\n", t0, t1, t2, t3)
 	//calculate clock offset
 
 	globalClockOffset := (t1.Sub(t0) + t2.Sub(t3)) / 2
@@ -152,10 +151,10 @@ func waitTimer(cycles int) int {
 	C.init_perfcounters(1, 0)
 
 	timeStart := C.ulonglong(C.get_cyclecount())
-	timeElapsed := C.ulonglong(0);
+	timeElapsed := C.ulonglong(0)
 	for {
 		timeElapsed = C.ulonglong(C.get_cyclecount()) - timeStart
-		if (timeElapsed > C.ulonglong(cycles)) {
+		if timeElapsed > C.ulonglong(cycles) {
 			break
 		}
 	}
@@ -170,56 +169,47 @@ func exchangeTimestamps(f *os.File) {
 	writeMessage(f, t3)
 	// gotta get t1...
 	t1 := readMessage(f)
-	calculateClockOffset(t0,t1,t2,t3)
-	calculateDelayRTT(t0,t1,t2,t3)
+	calculateClockOffset(t0, t1, t2, t3)
+	calculateDelayRTT(t0, t1, t2, t3)
 }
 
-func timer2(c2 chan string) {
-	C.init_perfcounters (1, 0);
-	start := time.Now()
+func waitForEvent(c2 chan string) {
+
+}
+
+func acceptanceWindow(c1 chan string, cycles int) {
+	C.init_perfcounters(1, 0)
 	t := C.get_cyclecount()
 	for {
-		t1 := C.get_cyclecount() - t;
+		t1 := C.get_cyclecount() - t
 		if t1 > 20000000 {
-			elapsed := time.Since(start)
 			c2 <- "result 2"
 			fmt.Printf("time elapsed %s\n", elapsed)
 			break
 		}
 	}
-}
+	// init counters:
+	C.init_perfcounters(1, 0)
+	timeStart := C.ulonglong(C.get_cyclecount())
+	for {
+		timeElapsed := C.ulonglong(C.get_cyclecount()) - timeStart
+		if timeElapsed > C.ulonglong(cycles) {
+			c2 <- "MISSED WINDOW"
+			break
+		}
+	}
 
-func timer1 (c1 chan string) {
-	//t = C.get_cyclecount();
-	//timer := time.NewTimer(time.Millisecond*2)
-	//<- timer.C
-	start := time.Now()
-	time.Sleep(time.Millisecond*10)
-	elapsed := time.Since(start)
-	//t = C.get_cyclecount() - t;
-	c1 <- "result 1"
-	fmt.Printf("time elapsed %s\n", elapsed)
-	//fmt.Printf("Waiting 2 ms took exactly %d cycles and overhead of get_cyclecount() was %d cycles\n", t - overhead, overhead);
 }
 
 func priority_test() {
 	// init counters:
-	C.init_perfcounters (1, 0); 
+	C.init_perfcounters(1, 0)
 
 	// measure the counting overhead:
-	overhead := C.get_cyclecount();
-	overhead = C.get_cyclecount() - overhead;    
-
-	t := C.get_cyclecount();
-
-	fmt.Println("test data to benchmark Println function call")	
-
-	t = C.get_cyclecount() - t;
-
-	fmt.Printf("Println took exactly %d cycles and overhead of get_cyclecount() was %d cycles\n", t - overhead, overhead);
-	
-	c1 := make (chan string, 1)
-	c2 := make (chan string, 1)
+	overhead := C.get_cyclecount()
+	overhead = C.get_cyclecount() - overhead
+	c1 := make(chan string, 1)
+	c2 := make(chan string, 1)
 	go timer1(c1)
 	go timer2(c2)
 	select {
@@ -227,8 +217,6 @@ func priority_test() {
 		fmt.Println(res)
 	case res := <-c2:
 		fmt.Println(res)
-	//case <-time.After(time.Millisecond*1):
-		//fmt.Println("timeout 1")
 	}
 }
 
