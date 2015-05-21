@@ -146,21 +146,6 @@ func writeMessage(f *os.File, str string) {
 	fmt.Printf("Sent %d bytes: %s\n", count, str)
 }
 
-func waitTimer(cycles int) int {
-	// init counters:
-	C.init_perfcounters(1, 0)
-
-	timeStart := C.ulonglong(C.get_cyclecount())
-	timeElapsed := C.ulonglong(0)
-	for {
-		timeElapsed = C.ulonglong(C.get_cyclecount()) - timeStart
-		if timeElapsed > C.ulonglong(cycles) {
-			break
-		}
-	}
-	return int(timeElapsed)
-}
-
 func exchangeTimestamps(f *os.File) {
 	t0 := generateTimestamp()
 	writeMessage(f, t0)
@@ -173,50 +158,34 @@ func exchangeTimestamps(f *os.File) {
 	calculateDelayRTT(t0, t1, t2, t3)
 }
 
-func waitForEvent(c2 chan string) {
-
+func waitForEvent(c2 chan string, f *os.File, cycles int) {
+	writeMessage(f, fmt.Sprintf("%27d", cycles))
+	readMessage(f)
+	c2 <- "Success: Response within acceptance window\n"
 }
 
 func acceptanceWindow(c1 chan string, cycles int) {
-	C.init_perfcounters(1, 0)
-	t := C.get_cyclecount()
-	for {
-		t1 := C.get_cyclecount() - t
-		if t1 > 20000000 {
-			c2 <- "result 2"
-			fmt.Printf("time elapsed %s\n", elapsed)
-			break
-		}
-	}
-	// init counters:
 	C.init_perfcounters(1, 0)
 	timeStart := C.ulonglong(C.get_cyclecount())
 	for {
 		timeElapsed := C.ulonglong(C.get_cyclecount()) - timeStart
 		if timeElapsed > C.ulonglong(cycles) {
-			c2 <- "MISSED WINDOW"
+			c1 <- "MISSED WINDOW\n"
 			break
 		}
 	}
-
 }
 
-func priority_test() {
-	// init counters:
-	C.init_perfcounters(1, 0)
-
-	// measure the counting overhead:
-	overhead := C.get_cyclecount()
-	overhead = C.get_cyclecount() - overhead
+func priority_test(f *os.File, windowSize int, waitTime int) {
 	c1 := make(chan string, 1)
 	c2 := make(chan string, 1)
-	go timer1(c1)
-	go timer2(c2)
+	go acceptanceWindow(c1, windowSize)
+	go waitForEvent(c2, f, waitTime)
 	select {
-	case res := <-c1:
-		fmt.Println(res)
-	case res := <-c2:
-		fmt.Println(res)
+		case res := <-c1:
+			fmt.Println(res)
+		case res := <-c2:
+			fmt.Println(res)
 	}
 }
 
@@ -226,7 +195,8 @@ func main() {
 		fmt.Printf("Failed to open the serial port!")
 	}
 	exchangeTimestamps(f)
-	timeElapsed := waitTimer(2000)
-	fmt.Printf("Coordinator waited %v cycles\n", timeElapsed)
+	windowSize := 600000000  //cycles at 1ghz is 0.6s
+	waitTime := 500000000	//cycles at 1ghz is 0.5s
+	priority_test(f, windowSize, waitTime)
 	f.Close()
 }
