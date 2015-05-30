@@ -1,3 +1,7 @@
+//pin 12 and pin 15 from P9 on BBB
+//pin 12 = gpio60
+//pin 15 = gpio48
+
 // ledTest
 package main
 
