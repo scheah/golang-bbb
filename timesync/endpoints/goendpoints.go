@@ -43,6 +43,7 @@ import "syscall"
 import "unsafe"
 import "time"
 import "strconv"
+import "strings"
 
 var gClockOffset time.Duration
 var gDelayRTT time.Duration
@@ -119,7 +120,7 @@ func calculateClockOffset(p0 string, p1 string, p2 string, p3 string) time.Durat
 	return gClockOffset
 }
 
-func calculateDelayRTT(p0 string, p1 string, p2 string, p3 string) time.Duration {
+func calculateDelayRTT(p0 string, p1 string, p2 string, p3 string) uint64 {
 	// parse time stamp string
 	t0 := parseTimestamp(p0)
 	t1 := parseTimestamp(p1)
@@ -127,10 +128,10 @@ func calculateDelayRTT(p0 string, p1 string, p2 string, p3 string) time.Duration
 	t3 := parseTimestamp(p3)
 	gDelayRTT = (t3.Sub(t0) + t2.Sub(t1))
 	fmt.Printf("RTT delay: %v\n", gDelayRTT)
-	return gDelayRTT
+	return uint64(gDelayRTT.Nanoseconds())
 }
 
-func exchangeTimestamps(f *os.File) {
+func exchangeTimestamps(f *os.File, c1 chan uint64) {
 	// client = coordinator, server = endpoints. We are server
 	// t0 is the client's timestamp of the request packet transmission,
 	// t1 is the server's timestamp of the request packet reception,
@@ -145,7 +146,7 @@ func exchangeTimestamps(f *os.File) {
 	// gotta send t1
 	writeMessage(f, t1)
 	calculateClockOffset(t0,t1,t2,t3)
-	calculateDelayRTT(t0,t1,t2,t3)
+	c1 <-calculateDelayRTT(t0,t1,t2,t3)
 }
 
 func readMessage(f *os.File) string {
@@ -167,26 +168,34 @@ func writeMessage(f *os.File, str string) {
 	fmt.Printf("Sent %d bytes: %s\n", count, str)
 }
 
-func waitTimer(cycles int) int {
+func waitTimer(cycles uint64, f *os.File) int {
 	// init counters:
 	C.init_perfcounters(1, 0)
-
+	//fmt.Printf("cyles to wait: %d\n", cycles)
 	timeStart := C.ulonglong(C.get_cyclecount())
 	timeElapsed := C.ulonglong(0);
 	for {
 		timeElapsed = C.ulonglong(C.get_cyclecount()) - timeStart
 		if (timeElapsed > C.ulonglong(cycles)) {
+			writeMessage(f, fmt.Sprintf("%27s", "COMPLETE"))
 			break
 		}
 	}
 	return int(timeElapsed)
 }
 
-func priority_test(f *os.File) {
+func priority_test(f *os.File, c1 chan uint64) {
+	rtt := <- c1
 	str := readMessage(f)
-	cycles, _ := strconv.Atoi(str)
-	waitTimer(cycles)
-	writeMessage(f, fmt.Sprintf("%27s", "COMPLETE"))
+	cycles, err := strconv.ParseUint(strings.TrimSpace(str), 0, 64)
+	if err != nil {
+        fmt.Println(err)
+    }
+	fmt.Printf("readMessage string: %s\n", str)
+	fmt.Printf("rtt: %d\n", rtt)
+	fmt.Printf("cycles: %d\n", cycles)
+	waitTimer(cycles-rtt-rtt, f)
+	//writeMessage(f, fmt.Sprintf("%27s", "COMPLETE"))
 }
 
 func main() {
@@ -194,7 +203,8 @@ func main() {
 	if err != nil {
 		fmt.Printf("Failed to open the serial port!")
 	}
-	exchangeTimestamps(f)
-	priority_test(f)
+	c1 := make(chan uint64, 1)
+	exchangeTimestamps(f, c1)
+	priority_test(f, c1)
 	f.Close()
 }

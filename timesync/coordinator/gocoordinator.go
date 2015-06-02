@@ -164,7 +164,7 @@ func waitForEvent(c2 chan string, f *os.File, cycles int) {
 	c2 <- "Success: Response within acceptance window\n"
 }
 
-func acceptanceWindow(c1 chan string, cycles int) {
+func upperWindow(c1 chan string, cycles int) {
 	C.init_perfcounters(1, 0)
 	timeStart := C.ulonglong(C.get_cyclecount())
 	for {
@@ -176,11 +176,32 @@ func acceptanceWindow(c1 chan string, cycles int) {
 	}
 }
 
+func lowerWindow(c1 chan string, cycles int) {
+	C.init_perfcounters(1, 0)
+	timeStart := C.ulonglong(C.get_cyclecount())
+	for {
+		timeElapsed := C.ulonglong(C.get_cyclecount()) - timeStart
+		if timeElapsed > C.ulonglong(cycles) {
+			c1 <- "ENTER WINDOW\n"
+			break
+		}
+	}
+}
+
 func priority_test(f *os.File, windowSize int, waitTime int) {
 	c1 := make(chan string, 1)
 	c2 := make(chan string, 1)
-	go acceptanceWindow(c1, windowSize)
+	go upperWindow(c1, windowSize)
+	go lowerWindow(c1, waitTime)
 	go waitForEvent(c2, f, waitTime)
+	select { 
+		case res1 := <- c1:
+			fmt.Println(res1)
+		case res1 := <- c2:
+			fmt.Println(res1)
+			fmt.Println("received message too early")
+			return
+	}
 	select {
 		case res := <-c1:
 			fmt.Println(res)
