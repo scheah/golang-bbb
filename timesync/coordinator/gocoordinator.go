@@ -158,8 +158,13 @@ func exchangeTimestamps(f *os.File) {
 	calculateDelayRTT(t0, t1, t2, t3)
 }
 
-func waitForEvent(c2 chan string, f *os.File, cycles int) {
-	writeMessage(f, fmt.Sprintf("%27d", cycles))
+//func waitForEvent(c2 chan string, f *os.File, cycles int) {
+	//writeMessage(f, fmt.Sprintf("%27d", cycles))
+	//readMessage(f)
+	//c2 <- "Success: Response within acceptance window\n"
+//}
+
+func waitForEvent(c2 chan string, f *os.File) {
 	readMessage(f)
 	c2 <- "Success: Response within acceptance window\n"
 }
@@ -188,36 +193,72 @@ func lowerWindow(c1 chan string, cycles int) {
 	}
 }
 
-func priority_test(f *os.File, windowSize int, waitTime int) {
+func priority_test(usb *os.File, windowSize int, waitTime int, led_blue *os.File, led_green *os.File) {
 	c1 := make(chan string, 1)
 	c2 := make(chan string, 1)
 	go upperWindow(c1, windowSize)
 	go lowerWindow(c1, waitTime)
-	go waitForEvent(c2, f, waitTime)
+	writeMessage(usb, fmt.Sprintf("%27d", waitTime))
+	go waitForEvent(c2, usb)
 	select { 
-		case res1 := <- c1:
-			fmt.Println(res1)
-		case res1 := <- c2:
-			fmt.Println(res1)
-			fmt.Println("received message too early")
+		case res := <- c1:
+			fmt.Println(res)
+		case <- c2:
+			fmt.Println("received message too early.. FAILED")
 			return
 	}
 	select {
 		case res := <-c1:
 			fmt.Println(res)
 		case res := <-c2:
+			turnOff(led_blue)
+			turnOn(led_green)
 			fmt.Println(res)
 	}
 }
 
+func turnOn(f *os.File) {
+	on := []byte("1")
+	_, err := f.Write(on)
+	if err != nil {
+		fmt.Printf("error occured: %v\n", err)
+	}
+}
+
+func turnOff(f *os.File) {
+	off := []byte("0")
+	_, err := f.Write(off)
+	if err != nil {
+		fmt.Printf("error occured: %v\n", err)
+	}
+}
+
 func main() {
-	f, err := openPort("/dev/ttyUSB0")
+	usb, err := openPort("/dev/ttyUSB0")
 	if err != nil {
 		fmt.Printf("Failed to open the serial port!")
+		return
 	}
-	exchangeTimestamps(f)
+//pin 12 and pin 15 from P9 on BBB
+//pin 12 = gpio60
+//pin 15 = gpio48
+	led_blue, err := os.OpenFile("/sys/class/gpio/gpio48/value", os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+	if err != nil {
+		fmt.Printf("error occured: %v\n", err)
+		return
+	}
+	led_green, err := os.OpenFile("/sys/class/gpio/gpio60/value", os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+	if err != nil {
+		fmt.Printf("error occured: %v\n", err)
+		return
+	}
+	turnOn(led_blue)
+	turnOff(led_green)
+	exchangeTimestamps(usb)
 	windowSize := 600000000  //cycles at 1ghz is 0.6s
 	waitTime := 500000000	//cycles at 1ghz is 0.5s
-	priority_test(f, windowSize, waitTime)
-	f.Close()
+	priority_test(usb, windowSize, waitTime, led_blue, led_green)
+	usb.Close()
+	led_blue.Close()
+	led_green.Close()
 }
