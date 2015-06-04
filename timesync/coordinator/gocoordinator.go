@@ -44,6 +44,8 @@ import "unsafe"
 import "time"
 
 var timeStampLayout = "02:Jan:2006:15:04:05.000000"
+var samples = 100
+var delayEntries = make([]uint64, samples)
 
 func openPort(name string) (f *os.File, err error) {
 
@@ -102,29 +104,15 @@ func parseTimestamp(timestamp string) time.Time {
 	return t
 }
 
-func calculateClockOffset(p0 string, p1 string, p2 string, p3 string) time.Duration {
+func calculateDelayRTT(p0 string, p1 string, p2 string, p3 string) uint64 {
 	// parse time stamp string
 	t0 := parseTimestamp(p0)
 	t1 := parseTimestamp(p1)
 	t2 := parseTimestamp(p2)
 	t3 := parseTimestamp(p3)
-	fmt.Printf("t0: %v \nt1: %v \nt2: %v \nt3: %v\n", t0, t1, t2, t3)
-	//calculate clock offset
-
-	globalClockOffset := (t1.Sub(t0) + t2.Sub(t3)) / 2
-	fmt.Printf("offset: %v\n", globalClockOffset)
-	return globalClockOffset
-}
-
-func calculateDelayRTT(p0 string, p1 string, p2 string, p3 string) time.Duration {
-	// parse time stamp string
-	t0 := parseTimestamp(p0)
-	t1 := parseTimestamp(p1)
-	t2 := parseTimestamp(p2)
-	t3 := parseTimestamp(p3)
-	gDelayRTT := (t3.Sub(t0) + t2.Sub(t1))
-	fmt.Printf("RTT delay: %v\n", gDelayRTT)
-	return gDelayRTT
+	delayRTT := (t3.Sub(t0) + t2.Sub(t1))
+	//fmt.Printf("RTT delay: %v\n", delayRTT)
+	return uint64(delayRTT.Nanoseconds())
 }
 
 func readMessage(f *os.File) string {
@@ -146,7 +134,7 @@ func writeMessage(f *os.File, str string) {
 	fmt.Printf("Sent %d bytes: %s\n", count, str)
 }
 
-func exchangeTimestamps(f *os.File) {
+func exchangeTimestamps(f *os.File) uint64 {
 	t0 := generateTimestamp()
 	writeMessage(f, t0)
 	t2 := readMessage(f)
@@ -155,13 +143,13 @@ func exchangeTimestamps(f *os.File) {
 	// gotta get t1...
 	t1 := readMessage(f)
 	calculateClockOffset(t0, t1, t2, t3)
-	calculateDelayRTT(t0, t1, t2, t3)
+	return calculateDelayRTT(t0, t1, t2, t3)
 }
 
 //func waitForEvent(c2 chan string, f *os.File, cycles int) {
-	//writeMessage(f, fmt.Sprintf("%27d", cycles))
-	//readMessage(f)
-	//c2 <- "Success: Response within acceptance window\n"
+//writeMessage(f, fmt.Sprintf("%27d", cycles))
+//readMessage(f)
+//c2 <- "Success: Response within acceptance window\n"
 //}
 
 func waitForEvent(c2 chan string, f *os.File) {
@@ -169,7 +157,7 @@ func waitForEvent(c2 chan string, f *os.File) {
 	c2 <- "Success: Response within acceptance window\n"
 }
 
-func upperWindow(c1 chan string, cycles int) {
+func upperWindow(c1 chan string, cycles uint64) {
 	C.init_perfcounters(1, 0)
 	timeStart := C.ulonglong(C.get_cyclecount())
 	for {
@@ -181,7 +169,7 @@ func upperWindow(c1 chan string, cycles int) {
 	}
 }
 
-func lowerWindow(c1 chan string, cycles int) {
+func lowerWindow(c1 chan string, cycles uint64) {
 	C.init_perfcounters(1, 0)
 	timeStart := C.ulonglong(C.get_cyclecount())
 	for {
@@ -200,20 +188,20 @@ func priority_test(usb *os.File, windowSize int, waitTime int, led_blue *os.File
 	go lowerWindow(c1, waitTime)
 	writeMessage(usb, fmt.Sprintf("%27d", waitTime))
 	go waitForEvent(c2, usb)
-	select { 
-		case res := <- c1:
-			fmt.Println(res)
-		case <- c2:
-			fmt.Println("received message too early.. FAILED")
-			return
+	select {
+	case res := <-c1:
+		fmt.Println(res)
+	case <-c2:
+		fmt.Println("received message too early.. FAILED")
+		return
 	}
 	select {
-		case res := <-c1:
-			fmt.Println(res)
-		case res := <-c2:
-			turnOff(led_blue)
-			turnOn(led_green)
-			fmt.Println(res)
+	case res := <-c1:
+		fmt.Println(res)
+	case res := <-c2:
+		turnOff(led_blue)
+		turnOn(led_green)
+		fmt.Println(res)
 	}
 }
 
@@ -239,9 +227,9 @@ func main() {
 		fmt.Printf("Failed to open the serial port!")
 		return
 	}
-//pin 12 and pin 15 from P9 on BBB
-//pin 12 = gpio60
-//pin 15 = gpio48
+	//pin 12 and pin 15 from P9 on BBB
+	//pin 12 = gpio60
+	//pin 15 = gpio48
 	led_blue, err := os.OpenFile("/sys/class/gpio/gpio48/value", os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
 	if err != nil {
 		fmt.Printf("error occured: %v\n", err)
@@ -254,9 +242,30 @@ func main() {
 	}
 	turnOn(led_blue)
 	turnOff(led_green)
-	exchangeTimestamps(usb)
-	windowSize := 600000000  //cycles at 1ghz is 0.6s
-	waitTime := 500000000	//cycles at 1ghz is 0.5s
+
+	// Delay/Jitter Calculations
+	totalDelay := uint64(0)
+	for i := 0; i < samples; i++ {
+		delayEntries[i] = exchangeTimestamps(usb)
+		totalDelay += delayEntries[i]
+	}
+	avgdelay := totaldelay / samples
+	totaljitter := uint64(0)
+	jitter := uint64(0)
+	for i := 0; i < samples; i++ {
+		if delayEntries[i] > avgdelay {
+			jitter = delayEntries[i] - avgdelay
+		} else {
+			jitter = avgdelay - delayEntries[i]
+		}
+		totaljitter += jitter
+	}
+	avgjitter := totaljitter / samples
+	fmt.Printf("Avg. Delay = %v ns\n", avgdelay)
+	fmt.Printf("Avg. Jitter = %v ns\n", avgjitter)
+
+	windowSize := 600000000 //cycles at 1ghz is 0.6s
+	waitTime := 500000000   //cycles at 1ghz is 0.5s
 	priority_test(usb, windowSize, waitTime, led_blue, led_green)
 	usb.Close()
 	led_blue.Close()
