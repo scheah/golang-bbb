@@ -140,7 +140,6 @@ func exchangeTimestamps(f *os.File) uint64 {
 	writeMessage(f, t3)
 	// gotta get t1...
 	t1 := readMessage(f)
-	calculateClockOffset(t0, t1, t2, t3)
 	return calculateDelayRTT(t0, t1, t2, t3)
 }
 
@@ -179,7 +178,7 @@ func lowerWindow(c1 chan string, cycles uint64) {
 	}
 }
 
-func priority_test(usb *os.File, windowSize int, waitTime int, led_blue *os.File, led_green *os.File) {
+func priority_test(usb *os.File, windowSize uint64, waitTime uint64, led_blue *os.File, led_green *os.File) {
 	c1 := make(chan string, 1)
 	c2 := make(chan string, 1)
 	go upperWindow(c1, windowSize)
@@ -220,15 +219,15 @@ func turnOff(f *os.File) {
 }
 
 func calculateDelayJitter(f *os.File) (aDelay uint64, aJitter uint64) {
-	samples = 100
-	delayEntries = make([]uint64, samples)
+	samples := 100
+	delayEntries := make([]uint64, samples)
 	// Delay/Jitter Calculations
 	totalDelay := uint64(0)
 	for i := 0; i < samples; i++ {
 		delayEntries[i] = exchangeTimestamps(f)
 		totalDelay += delayEntries[i]
 	}
-	avgdelay := totaldelay / samples
+	avgdelay := totalDelay / uint64(samples)
 	totaljitter := uint64(0)
 	jitter := uint64(0)
 	for i := 0; i < samples; i++ {
@@ -239,9 +238,7 @@ func calculateDelayJitter(f *os.File) (aDelay uint64, aJitter uint64) {
 		}
 		totaljitter += jitter
 	}
-	avgjitter := totaljitter / samples
-	fmt.Printf("Avg. Delay = %v ns\n", avgdelay)
-	fmt.Printf("Avg. Jitter = %v ns\n", avgjitter)
+	avgjitter := totaljitter / uint64(samples)
 	return avgdelay, avgjitter
 }
 
@@ -267,8 +264,10 @@ func main() {
 	turnOn(led_blue)
 	turnOff(led_green)
 	avgDelay, avgJitter := calculateDelayJitter(usb)
-	windowSize := 600000000 //cycles at 1ghz is 0.6s
-	waitTime := 500000000   //cycles at 1ghz is 0.5s
+	fmt.Printf("Avg. Delay = %v ns\n", avgDelay)
+	fmt.Printf("Avg. Jitter = %v ns\n", avgJitter)
+	windowSize := uint64(600000000) //cycles at 1ghz is 0.6s
+	waitTime := uint64(500000000)   //cycles at 1ghz is 0.5s
 	priority_test(usb, windowSize, waitTime, led_blue, led_green)
 	usb.Close()
 	led_blue.Close()

@@ -200,15 +200,15 @@ func priority_test(f *os.File, delay uint64) {
 }
 
 func calculateDelayJitter(f *os.File) (aDelay uint64, aJitter uint64) {
-	samples = 100
-	delayEntries = make([]uint64, samples)
+	samples := 100
+	delayEntries := make([]uint64, samples)
 	// Delay/Jitter Calculations
 	totalDelay := uint64(0)
 	for i := 0; i < samples; i++ {
 		delayEntries[i] = exchangeTimestamps(f)
 		totalDelay += delayEntries[i]
 	}
-	avgdelay := totaldelay / samples
+	avgdelay := totalDelay / uint64(samples)
 	totaljitter := uint64(0)
 	jitter := uint64(0)
 	for i := 0; i < samples; i++ {
@@ -219,9 +219,7 @@ func calculateDelayJitter(f *os.File) (aDelay uint64, aJitter uint64) {
 		}
 		totaljitter += jitter
 	}
-	avgjitter := totaljitter / samples
-	fmt.Printf("Avg. Delay = %v ns\n", avgdelay)
-	fmt.Printf("Avg. Jitter = %v ns\n", avgjitter)
+	avgjitter := totaljitter / uint64(samples)
 	return avgdelay, avgjitter
 }
 
@@ -231,6 +229,8 @@ func main() {
 		fmt.Printf("Failed to open the serial port!")
 	}
 	avgDelay, avgJitter := calculateDelayJitter(f)
+	fmt.Printf("Avg. Delay = %v ns\n", avgDelay)
+	fmt.Printf("Avg. Jitter = %v ns\n", avgJitter)
 	priority_test(f, avgDelay)
 	f.Close()
 }
