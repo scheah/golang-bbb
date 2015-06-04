@@ -48,6 +48,7 @@ import "strings"
 var gClockOffset time.Duration
 var gDelayRTT time.Duration
 var timeStampLayout = "02:Jan:2006:15:04:05.000000"
+var samples = 100
 
 func openPort(name string) (f *os.File, err error) {
 
@@ -99,7 +100,7 @@ func generateTimestamp() string {
 }
 
 func parseTimestamp(timestamp string) time.Time {
-	t, e := time.Parse(timeStampLayout,timestamp)
+	t, e := time.Parse(timeStampLayout, timestamp)
 	if e != nil {
 		fmt.Printf("Parse error occured: %v\n", e)
 	}
@@ -112,7 +113,7 @@ func calculateClockOffset(p0 string, p1 string, p2 string, p3 string) time.Durat
 	t1 := parseTimestamp(p1)
 	t2 := parseTimestamp(p2)
 	t3 := parseTimestamp(p3)
-	fmt.Printf("t0: %v \nt1: %v \nt2: %v \nt3: %v\n", t0,t1,t2,t3)
+	fmt.Printf("t0: %v \nt1: %v \nt2: %v \nt3: %v\n", t0, t1, t2, t3)
 	//calculate clock offset
 
 	gClockOffset = (t1.Sub(t0) + t2.Sub(t3)) / 2
@@ -131,13 +132,13 @@ func calculateDelayRTT(p0 string, p1 string, p2 string, p3 string) uint64 {
 	return uint64(gDelayRTT.Nanoseconds())
 }
 
-func exchangeTimestamps(f *os.File, c1 chan uint64) {
+func exchangeTimestamps(f *os.File) uint64 {
 	// client = coordinator, server = endpoints. We are server
 	// t0 is the client's timestamp of the request packet transmission,
 	// t1 is the server's timestamp of the request packet reception,
 	t0 := readMessage(f)
 	t1 := generateTimestamp()
-	
+
 	// t2 is the server's timestamp of the response packet transmission and
 	// t3 is the client's timestamp of the response packet reception.
 	t2 := generateTimestamp()
@@ -145,8 +146,8 @@ func exchangeTimestamps(f *os.File, c1 chan uint64) {
 	t3 := readMessage(f)
 	// gotta send t1
 	writeMessage(f, t1)
-	calculateClockOffset(t0,t1,t2,t3)
-	c1 <-calculateDelayRTT(t0,t1,t2,t3)
+	calculateClockOffset(t0, t1, t2, t3)
+	return calculateDelayRTT(t0, t1, t2, t3)
 }
 
 func readMessage(f *os.File) string {
@@ -173,10 +174,10 @@ func waitTimer(cycles uint64, f *os.File) int {
 	C.init_perfcounters(1, 0)
 	//fmt.Printf("cyles to wait: %d\n", cycles)
 	timeStart := C.ulonglong(C.get_cyclecount())
-	timeElapsed := C.ulonglong(0);
+	timeElapsed := C.ulonglong(0)
 	for {
 		timeElapsed = C.ulonglong(C.get_cyclecount()) - timeStart
-		if (timeElapsed > C.ulonglong(cycles)) {
+		if timeElapsed > C.ulonglong(cycles) {
 			writeMessage(f, fmt.Sprintf("%27s", "COMPLETE"))
 			break
 		}
@@ -184,13 +185,13 @@ func waitTimer(cycles uint64, f *os.File) int {
 	return int(timeElapsed)
 }
 
-func priority_test(f *os.File, c1 chan uint64) {
-	rtt := <- c1
+func priority_test(f *os.File, delay uint64) {
+	rtt := delay
 	str := readMessage(f)
 	cycles, err := strconv.ParseUint(strings.TrimSpace(str), 0, 64)
 	if err != nil {
-        fmt.Println(err)
-    }
+		fmt.Println(err)
+	}
 	fmt.Printf("readMessage string: %s\n", str)
 	fmt.Printf("rtt: %d\n", rtt)
 	fmt.Printf("cycles: %d\n", cycles)
@@ -198,13 +199,38 @@ func priority_test(f *os.File, c1 chan uint64) {
 	//writeMessage(f, fmt.Sprintf("%27s", "COMPLETE"))
 }
 
+func calculateDelayJitter(f *os.File) (aDelay uint64, aJitter uint64) {
+	samples = 100
+	delayEntries = make([]uint64, samples)
+	// Delay/Jitter Calculations
+	totalDelay := uint64(0)
+	for i := 0; i < samples; i++ {
+		delayEntries[i] = exchangeTimestamps(f)
+		totalDelay += delayEntries[i]
+	}
+	avgdelay := totaldelay / samples
+	totaljitter := uint64(0)
+	jitter := uint64(0)
+	for i := 0; i < samples; i++ {
+		if delayEntries[i] > avgdelay {
+			jitter = delayEntries[i] - avgdelay
+		} else {
+			jitter = avgdelay - delayEntries[i]
+		}
+		totaljitter += jitter
+	}
+	avgjitter := totaljitter / samples
+	fmt.Printf("Avg. Delay = %v ns\n", avgdelay)
+	fmt.Printf("Avg. Jitter = %v ns\n", avgjitter)
+	return avgdelay, avgjitter
+}
+
 func main() {
 	f, err := openPort("/dev/ttyUSB0")
 	if err != nil {
 		fmt.Printf("Failed to open the serial port!")
 	}
-	c1 := make(chan uint64, 1)
-	exchangeTimestamps(f, c1)
-	priority_test(f, c1)
+	avgDelay, avgJitter := calculateDelayJitter(f)
+	priority_test(f, avgDelay)
 	f.Close()
 }

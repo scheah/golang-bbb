@@ -44,8 +44,6 @@ import "unsafe"
 import "time"
 
 var timeStampLayout = "02:Jan:2006:15:04:05.000000"
-var samples = 100
-var delayEntries = make([]uint64, samples)
 
 func openPort(name string) (f *os.File, err error) {
 
@@ -221,6 +219,32 @@ func turnOff(f *os.File) {
 	}
 }
 
+func calculateDelayJitter(f *os.File) (aDelay uint64, aJitter uint64) {
+	samples = 100
+	delayEntries = make([]uint64, samples)
+	// Delay/Jitter Calculations
+	totalDelay := uint64(0)
+	for i := 0; i < samples; i++ {
+		delayEntries[i] = exchangeTimestamps(f)
+		totalDelay += delayEntries[i]
+	}
+	avgdelay := totaldelay / samples
+	totaljitter := uint64(0)
+	jitter := uint64(0)
+	for i := 0; i < samples; i++ {
+		if delayEntries[i] > avgdelay {
+			jitter = delayEntries[i] - avgdelay
+		} else {
+			jitter = avgdelay - delayEntries[i]
+		}
+		totaljitter += jitter
+	}
+	avgjitter := totaljitter / samples
+	fmt.Printf("Avg. Delay = %v ns\n", avgdelay)
+	fmt.Printf("Avg. Jitter = %v ns\n", avgjitter)
+	return avgdelay, avgjitter
+}
+
 func main() {
 	usb, err := openPort("/dev/ttyUSB0")
 	if err != nil {
@@ -242,28 +266,7 @@ func main() {
 	}
 	turnOn(led_blue)
 	turnOff(led_green)
-
-	// Delay/Jitter Calculations
-	totalDelay := uint64(0)
-	for i := 0; i < samples; i++ {
-		delayEntries[i] = exchangeTimestamps(usb)
-		totalDelay += delayEntries[i]
-	}
-	avgdelay := totaldelay / samples
-	totaljitter := uint64(0)
-	jitter := uint64(0)
-	for i := 0; i < samples; i++ {
-		if delayEntries[i] > avgdelay {
-			jitter = delayEntries[i] - avgdelay
-		} else {
-			jitter = avgdelay - delayEntries[i]
-		}
-		totaljitter += jitter
-	}
-	avgjitter := totaljitter / samples
-	fmt.Printf("Avg. Delay = %v ns\n", avgdelay)
-	fmt.Printf("Avg. Jitter = %v ns\n", avgjitter)
-
+	avgDelay, avgJitter := calculateDelayJitter(usb)
 	windowSize := 600000000 //cycles at 1ghz is 0.6s
 	waitTime := 500000000   //cycles at 1ghz is 0.5s
 	priority_test(usb, windowSize, waitTime, led_blue, led_green)
