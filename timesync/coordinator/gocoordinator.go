@@ -226,6 +226,8 @@ func calculateDelayJitter(f *os.File) (aDelay uint64, aJitter uint64) {
 	for i := 0; i < samples; i++ {
 		delayEntries[i] = exchangeTimestamps(f)
 		totalDelay += delayEntries[i]
+		fmt.Printf("RTT delay: %v\n", delayEntries[i])
+		fmt.Printf("Running total: %v\n", totalDelay);
 	}
 	avgdelay := totalDelay / uint64(samples)
 	totaljitter := uint64(0)

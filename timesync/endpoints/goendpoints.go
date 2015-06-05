@@ -107,29 +107,15 @@ func parseTimestamp(timestamp string) time.Time {
 	return t
 }
 
-func calculateClockOffset(p0 string, p1 string, p2 string, p3 string) time.Duration {
-	// parse time stamp string
-	t0 := parseTimestamp(p0)
-	t1 := parseTimestamp(p1)
-	t2 := parseTimestamp(p2)
-	t3 := parseTimestamp(p3)
-	fmt.Printf("t0: %v \nt1: %v \nt2: %v \nt3: %v\n", t0, t1, t2, t3)
-	//calculate clock offset
-
-	gClockOffset = (t1.Sub(t0) + t2.Sub(t3)) / 2
-	fmt.Printf("offset: %v\n", gClockOffset)
-	return gClockOffset
-}
-
 func calculateDelayRTT(p0 string, p1 string, p2 string, p3 string) uint64 {
 	// parse time stamp string
 	t0 := parseTimestamp(p0)
 	t1 := parseTimestamp(p1)
 	t2 := parseTimestamp(p2)
 	t3 := parseTimestamp(p3)
-	gDelayRTT = (t3.Sub(t0) + t2.Sub(t1))
-	fmt.Printf("RTT delay: %v\n", gDelayRTT)
-	return uint64(gDelayRTT.Nanoseconds())
+	delayRTT := (t3.Sub(t0) + t2.Sub(t1))
+	//fmt.Printf("RTT delay: %v\n", delayRTT)
+	return uint64(delayRTT.Nanoseconds())
 }
 
 func exchangeTimestamps(f *os.File) uint64 {
@@ -146,7 +132,7 @@ func exchangeTimestamps(f *os.File) uint64 {
 	t3 := readMessage(f)
 	// gotta send t1
 	writeMessage(f, t1)
-	calculateClockOffset(t0, t1, t2, t3)
+	//calculateClockOffset(t0, t1, t2, t3)
 	return calculateDelayRTT(t0, t1, t2, t3)
 }
 
@@ -207,6 +193,8 @@ func calculateDelayJitter(f *os.File) (aDelay uint64, aJitter uint64) {
 	for i := 0; i < samples; i++ {
 		delayEntries[i] = exchangeTimestamps(f)
 		totalDelay += delayEntries[i]
+		//fmt.Printf("RTT delay: %v\n", delayEntries[i])
+		//fmt.Printf("Running total: %v\n", totalDelay);
 	}
 	avgdelay := totalDelay / uint64(samples)
 	totaljitter := uint64(0)
