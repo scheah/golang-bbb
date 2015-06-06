@@ -44,9 +44,9 @@ import "unsafe"
 import "time"
 import "strconv"
 import "strings"
+import "sort"
+import "log"
 
-var gClockOffset time.Duration
-var gDelayRTT time.Duration
 var timeStampLayout = "02:Jan:2006:15:04:05.000000"
 var samples = 100
 
@@ -94,6 +94,11 @@ func openPort(name string) (f *os.File, err error) {
 	return f, nil
 }
 
+type int64arr []int64
+func (a int64arr) Len() int { return len(a) }
+func (a int64arr) Swap(i, j int){ a[i], a[j] = a[j], a[i] }
+func (a int64arr) Less(i, j int) bool { return a[i] < a[j] }
+
 func generateTimestamp() string {
 	t := time.Now()
 	return t.Format(timeStampLayout)
@@ -107,7 +112,11 @@ func parseTimestamp(timestamp string) time.Time {
 	return t
 }
 
+<<<<<<< Updated upstream
 func calculateDelayRTT(p0 string, p1 string, p2 string, p3 string) uint64 {
+=======
+func calculateDelayRTT(p0 string, p1 string, p2 string, p3 string) int64 {
+>>>>>>> Stashed changes
 	// parse time stamp string
 	t0 := parseTimestamp(p0)
 	t1 := parseTimestamp(p1)
@@ -115,10 +124,14 @@ func calculateDelayRTT(p0 string, p1 string, p2 string, p3 string) uint64 {
 	t3 := parseTimestamp(p3)
 	delayRTT := (t3.Sub(t0) + t2.Sub(t1))
 	//fmt.Printf("RTT delay: %v\n", delayRTT)
+<<<<<<< Updated upstream
 	return uint64(delayRTT.Nanoseconds())
+=======
+	return int64(delayRTT.Nanoseconds())
+>>>>>>> Stashed changes
 }
 
-func exchangeTimestamps(f *os.File) uint64 {
+func exchangeTimestamps(f *os.File) int64 {
 	// client = coordinator, server = endpoints. We are server
 	// t0 is the client's timestamp of the request packet transmission,
 	// t1 is the server's timestamp of the request packet reception,
@@ -138,24 +151,24 @@ func exchangeTimestamps(f *os.File) uint64 {
 
 func readMessage(f *os.File) string {
 	buffer := make([]byte, 27)
-	count, err := f.Read(buffer)
+	_, err := f.Read(buffer)
 	if err != nil {
 		fmt.Printf("Read error occured: %v\n", err)
 	}
-	fmt.Printf("Received %d bytes: %s\n", count, string(buffer))
+	//fmt.Printf("Received %d bytes: %s\n", count, string(buffer))
 	return string(buffer)
 }
 
 func writeMessage(f *os.File, str string) {
 	buffer := []byte(str)
-	count, err := f.Write(buffer)
+	_, err := f.Write(buffer)
 	if err != nil {
 		fmt.Printf("Write error occured: %v\n", err)
 	}
-	fmt.Printf("Sent %d bytes: %s\n", count, str)
+	//fmt.Printf("Sent %d bytes: %s\n", count, str)
 }
 
-func waitTimer(cycles uint64, f *os.File) int {
+func waitTimer(cycles int64, f *os.File) int {
 	// init counters:
 	C.init_perfcounters(1, 0)
 	//fmt.Printf("cyles to wait: %d\n", cycles)
@@ -171,10 +184,10 @@ func waitTimer(cycles uint64, f *os.File) int {
 	return int(timeElapsed)
 }
 
-func priority_test(f *os.File, delay uint64) {
+func priority_test(f *os.File, delay int64) {
 	rtt := delay
 	str := readMessage(f)
-	cycles, err := strconv.ParseUint(strings.TrimSpace(str), 0, 64)
+	cycles, err := strconv.ParseInt(strings.TrimSpace(str), 0, 64)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -185,30 +198,53 @@ func priority_test(f *os.File, delay uint64) {
 	//writeMessage(f, fmt.Sprintf("%27s", "COMPLETE"))
 }
 
-func calculateDelayJitter(f *os.File) (aDelay uint64, aJitter uint64) {
+func calculateDelayJitter(f *os.File) (aDelay int64, aJitter int64) {
 	samples := 100
-	delayEntries := make([]uint64, samples)
+	delayEntries := make([]int64, samples)
 	// Delay/Jitter Calculations
-	totalDelay := uint64(0)
+	//totalDelay := uint64(0)
 	for i := 0; i < samples; i++ {
 		delayEntries[i] = exchangeTimestamps(f)
-		totalDelay += delayEntries[i]
-		//fmt.Printf("RTT delay: %v\n", delayEntries[i])
-		//fmt.Printf("Running total: %v\n", totalDelay);
+		log.Printf("%v\n", i)
+		//totalDelay += delayEntries[i]
 	}
-	avgdelay := totalDelay / uint64(samples)
-	totaljitter := uint64(0)
-	jitter := uint64(0)
+	//avgdelay := totalDelay / uint64(samples)
+	sort.Sort(int64arr(delayEntries))
+	avgdelay := (delayEntries[49] + delayEntries[59])/2
+	totaljitter := int64(0)
+	jitter := int64(0)
+	extremes := 0
+	jitterEntries := make([]int64, samples)
 	for i := 0; i < samples; i++ {
+		if delayEntries[i] > 300000000 {
+			extremes += 1
+			continue
+		}
 		if delayEntries[i] > avgdelay {
 			jitter = delayEntries[i] - avgdelay
 		} else {
 			jitter = avgdelay - delayEntries[i]
 		}
+		jitterEntries[i] = jitter;
+		//fmt.Printf("Cur Jitter = %d \n", jitter)
 		totaljitter += jitter
 	}
-	avgjitter := totaljitter / uint64(samples)
-	return avgdelay, avgjitter
+	sort.Sort(int64arr(jitterEntries))
+	samples -= extremes
+	avgjitter := totaljitter / int64(samples)
+	fmt.Printf("----------------------Delay Entries----------------------------------\n");
+	for i := 0; i < samples; i++ {
+		fmt.Printf("%v\n", delayEntries[i]);
+	}
+	fmt.Printf("----------------------Jitter Entries---------------------------------\n");
+	for i := 0; i < samples; i++ {
+		fmt.Printf("%v\n", jitterEntries[i]);
+	}
+	fmt.Printf("----------------------Final Statistics--------------------------------\n");
+	fmt.Printf("median  delay  = %v \n", avgdelay);
+	fmt.Printf("average jitter = %v \n", avgjitter);
+	fmt.Printf("Num outliers = %v \n", extremes)
+	return int64(avgdelay), int64(avgjitter)
 }
 
 func main() {
@@ -216,9 +252,10 @@ func main() {
 	if err != nil {
 		fmt.Printf("Failed to open the serial port!")
 	}
-	avgDelay, avgJitter := calculateDelayJitter(f)
-	fmt.Printf("Avg. Delay = %v ns\n", avgDelay)
-	fmt.Printf("Avg. Jitter = %v ns\n", avgJitter)
+	//avgDelay, avgJitter := calculateDelayJitter(f)
+	avgDelay, _ := calculateDelayJitter(f)
+	//fmt.Printf("Avg. Delay = %v ns\n", avgDelay)
+	//fmt.Printf("Avg. Jitter = %v ns\n", avgJitter)
 	priority_test(f, avgDelay)
 	f.Close()
 }
