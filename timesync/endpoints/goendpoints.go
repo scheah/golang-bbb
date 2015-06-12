@@ -112,11 +112,7 @@ func parseTimestamp(timestamp string) time.Time {
 	return t
 }
 
-<<<<<<< Updated upstream
-func calculateDelayRTT(p0 string, p1 string, p2 string, p3 string) uint64 {
-=======
 func calculateDelayRTT(p0 string, p1 string, p2 string, p3 string) int64 {
->>>>>>> Stashed changes
 	// parse time stamp string
 	t0 := parseTimestamp(p0)
 	t1 := parseTimestamp(p1)
@@ -124,11 +120,7 @@ func calculateDelayRTT(p0 string, p1 string, p2 string, p3 string) int64 {
 	t3 := parseTimestamp(p3)
 	delayRTT := (t3.Sub(t0) + t2.Sub(t1))
 	//fmt.Printf("RTT delay: %v\n", delayRTT)
-<<<<<<< Updated upstream
-	return uint64(delayRTT.Nanoseconds())
-=======
 	return int64(delayRTT.Nanoseconds())
->>>>>>> Stashed changes
 }
 
 func exchangeTimestamps(f *os.File) int64 {
@@ -145,7 +137,6 @@ func exchangeTimestamps(f *os.File) int64 {
 	t3 := readMessage(f)
 	// gotta send t1
 	writeMessage(f, t1)
-	//calculateClockOffset(t0, t1, t2, t3)
 	return calculateDelayRTT(t0, t1, t2, t3)
 }
 
@@ -184,7 +175,7 @@ func waitTimer(cycles int64, f *os.File) int {
 	return int(timeElapsed)
 }
 
-func priority_test(f *os.File, delay int64) {
+func priority_test(f *os.File, delay int64, avgJitter int64) {
 	rtt := delay
 	str := readMessage(f)
 	cycles, err := strconv.ParseInt(strings.TrimSpace(str), 0, 64)
@@ -194,7 +185,7 @@ func priority_test(f *os.File, delay int64) {
 	fmt.Printf("readMessage string: %s\n", str)
 	fmt.Printf("rtt: %d\n", rtt)
 	fmt.Printf("cycles: %d\n", cycles)
-	waitTimer(cycles-rtt-rtt, f)
+	waitTimer(cycles-rtt+avgJitter, f)
 	//writeMessage(f, fmt.Sprintf("%27s", "COMPLETE"))
 }
 
@@ -210,7 +201,7 @@ func calculateDelayJitter(f *os.File) (aDelay int64, aJitter int64) {
 	}
 	//avgdelay := totalDelay / uint64(samples)
 	sort.Sort(int64arr(delayEntries))
-	avgdelay := (delayEntries[49] + delayEntries[59])/2
+	avgdelay := (delayEntries[49] + delayEntries[50])/2
 	totaljitter := int64(0)
 	jitter := int64(0)
 	extremes := 0
@@ -253,9 +244,9 @@ func main() {
 		fmt.Printf("Failed to open the serial port!")
 	}
 	//avgDelay, avgJitter := calculateDelayJitter(f)
-	avgDelay, _ := calculateDelayJitter(f)
+	avgDelay, avgJitter := calculateDelayJitter(f)
 	//fmt.Printf("Avg. Delay = %v ns\n", avgDelay)
 	//fmt.Printf("Avg. Jitter = %v ns\n", avgJitter)
-	priority_test(f, avgDelay)
+	priority_test(f, avgDelay, avgJitter)
 	f.Close()
 }

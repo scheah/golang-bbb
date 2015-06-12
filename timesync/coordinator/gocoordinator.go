@@ -233,10 +233,11 @@ func calculateDelayJitter(f *os.File) (aDelay int64, aJitter int64) {
 	for i := 0; i < samples; i++ {
 		delayEntries[i] = exchangeTimestamps(f)
 		log.Printf("%v\n", i)
+		//totalDelay += delayEntries[i]
 	}
 	//avgdelay := totalDelay / uint64(samples)
 	sort.Sort(int64arr(delayEntries))
-	avgdelay := (delayEntries[49] + delayEntries[59])/2
+	avgdelay := (delayEntries[49] + delayEntries[50])/2
 	totaljitter := int64(0)
 	jitter := int64(0)
 	extremes := 0

@@ -1,5 +1,6 @@
 package main
 
+//#cgo CFLAGS: -O2
 //#cgo LDFLAGS: -L. -lftd2xx -Wl,-rpath /usr/local/lib
 //#include <stdint.h>
 //#include <stdio.h>
@@ -11,14 +12,14 @@ package main
 //FT_HANDLE	ftHandle0;
 //
 //char * readMsg() {
-//	DWORD RxBytes = 27;
+//	DWORD RxBytes = 64;
 //	DWORD BytesReceived;
 //	char * msg = malloc(RxBytes);
 //	ftStatus = FT_Read(ftHandle0,msg,RxBytes,&BytesReceived);	
 //	if (ftStatus == FT_OK) {
 //		if (BytesReceived == RxBytes) {
-//			printf("reading: %s\n", msg);
-//			printf("FT_Read OK\n", msg);
+//			//printf("reading: %s\n", msg);
+//			//printf("FT_Read OK\n", msg);
 //			return msg;
 //		}
 //		else {
@@ -33,13 +34,10 @@ package main
 //
 //void writeMsg(char * msg) {
 //	DWORD BytesWritten;
-//	//char TxBuffer[64]; // Contains data to write to device
-//	//strncpy(TxBuffer, msg, sizeof(TxBuffer));
-// 	//TxBuffer[sizeof(TxBuffer) - 1] = '\0';
-//	printf("writing: %s\n", msg);
-//	ftStatus = FT_Write(ftHandle0, msg, 27, &BytesWritten);
+//	//printf("writing: %s\n", msg);
+//	ftStatus = FT_Write(ftHandle0, msg, 64, &BytesWritten);
 //	if (ftStatus == FT_OK) {
-//		printf("FT_Write OK\n");
+//		//printf("FT_Write OK\n");
 //	}
 //	else {
 //		printf("FT_Write Failed\n");
@@ -207,6 +205,7 @@ package main
 //		retCode = 1;
 //		goto exit;
 //	}
+//  FT_SetDataCharacteristics(ftHandle0, FT_BITS_8, FT_STOP_BITS_1, FT_PARITY_NONE);
 //
 //
 //exit:
@@ -258,13 +257,10 @@ import "os"
 import "syscall"
 import "unsafe"
 import "time"
-import "strconv"
-import "strings"
 import "sort"
 import "log"
 
 var timeStampLayout = "02:Jan:2006:15:04:05.000000"
-var samples = 100
 
 func openPort(name string) (f *os.File, err error) {
 
@@ -328,7 +324,6 @@ func parseTimestamp(timestamp string) time.Time {
 	return t
 }
 
-
 func calculateDelayRTT(p0 string, p1 string, p2 string, p3 string) int64 {
 	// parse time stamp string
 	t0 := parseTimestamp(p0)
@@ -338,24 +333,6 @@ func calculateDelayRTT(p0 string, p1 string, p2 string, p3 string) int64 {
 	delayRTT := (t3.Sub(t0) + t2.Sub(t1))
 	//fmt.Printf("RTT delay: %v\n", delayRTT)
 	return int64(delayRTT.Nanoseconds())
-}
-
-func exchangeTimestamps() int64 {
-	// client = coordinator, server = endpoints. We are server
-	// t0 is the client's timestamp of the request packet transmission,
-	// t1 is the server's timestamp of the request packet reception,
-	t0 := C.GoString(C.readMsg())
-	t1 := generateTimestamp()
-
-	// t2 is the server's timestamp of the response packet transmission and
-	// t3 is the client's timestamp of the response packet reception.
-	t2 := generateTimestamp()
-	C.writeMsg(C.CString(t2))
-	t3 := C.GoString(C.readMsg())
-	// gotta send t1
-	C.writeMsg(C.CString(t1))
-	//calculateClockOffset(t0, t1, t2, t3)
-	return calculateDelayRTT(t0, t1, t2, t3)
 }
 
 func readMessage(f *os.File) string {
@@ -377,34 +354,90 @@ func writeMessage(f *os.File, str string) {
 	//fmt.Printf("Sent %d bytes: %s\n", count, str)
 }
 
-func waitTimer(cycles int64, f *os.File) int {
-	// init counters:
+func exchangeTimestamps() int64 {
+	t0 := generateTimestamp()
+	C.writeMsg(C.CString(t0))
+	t2 := C.GoString(C.readMsg())
+	t3 := generateTimestamp()
+	C.writeMsg(C.CString(t3))
+	// gotta get t1...
+	t1 := C.GoString(C.readMsg())
+	return calculateDelayRTT(t0, t1, t2, t3)
+}
+
+//func waitForEvent(c2 chan string, f *os.File, cycles int) {
+//writeMessage(f, fmt.Sprintf("%27d", cycles))
+//readMessage(f)
+//c2 <- "Success: Response within acceptance window\n"
+//}
+
+func waitForEvent(c2 chan string, f *os.File) {
+	readMessage(f)
+	c2 <- "Success: Response within acceptance window\n"
+}
+
+func upperWindow(c1 chan string, cycles int64) {
 	C.init_perfcounters(1, 0)
-	//fmt.Printf("cyles to wait: %d\n", cycles)
 	timeStart := C.ulonglong(C.get_cyclecount())
-	timeElapsed := C.ulonglong(0)
 	for {
-		timeElapsed = C.ulonglong(C.get_cyclecount()) - timeStart
+		timeElapsed := C.ulonglong(C.get_cyclecount()) - timeStart
 		if timeElapsed > C.ulonglong(cycles) {
-			writeMessage(f, fmt.Sprintf("%27s", "COMPLETE"))
+			c1 <- "MISSED WINDOW\n"
 			break
 		}
 	}
-	return int(timeElapsed)
 }
 
-func priority_test(f *os.File, delay int64) {
-	rtt := delay
-	str := readMessage(f)
-	cycles, err := strconv.ParseInt(strings.TrimSpace(str), 0, 64)
-	if err != nil {
-		fmt.Println(err)
+func lowerWindow(c1 chan string, cycles int64) {
+	C.init_perfcounters(1, 0)
+	timeStart := C.ulonglong(C.get_cyclecount())
+	for {
+		timeElapsed := C.ulonglong(C.get_cyclecount()) - timeStart
+		if timeElapsed > C.ulonglong(cycles) {
+			c1 <- "ENTER WINDOW\n"
+			break
+		}
 	}
-	fmt.Printf("readMessage string: %s\n", str)
-	fmt.Printf("rtt: %d\n", rtt)
-	fmt.Printf("cycles: %d\n", cycles)
-	waitTimer(cycles-rtt-rtt, f)
-	//writeMessage(f, fmt.Sprintf("%27s", "COMPLETE"))
+}
+
+func priority_test(usb *os.File, windowSize int64, waitTime int64, led_blue *os.File, led_green *os.File) {
+	c1 := make(chan string, 1)
+	c2 := make(chan string, 1)
+	go upperWindow(c1, windowSize)
+	go lowerWindow(c1, waitTime)
+	writeMessage(usb, fmt.Sprintf("%27d", waitTime))
+	go waitForEvent(c2, usb)
+	select {
+	case res := <-c1:
+		fmt.Println(res)
+	case <-c2:
+		fmt.Println("received message too early.. FAILED")
+		return
+	}
+	select {
+	case res := <-c1:
+		fmt.Println(res)
+	case res := <-c2:
+		turnOff(led_blue)
+		turnOn(led_green)
+		fmt.Println(res)
+	}
+}
+
+func turnOn(f *os.File) {
+	on := []byte("1")
+	_, err := f.Write(on)
+	if err != nil {
+		fmt.Printf("error occured: %v\n", err)
+	}
+}
+
+func turnOff(f *os.File) {
+	off := []byte("0")
+	_, err := f.Write(off)
+	if err != nil {
+		fmt.Printf("error occured: %v\n", err)
+	}
 }
 
 func calculateDelayJitter() (aDelay int64, aJitter int64) {
@@ -415,11 +448,10 @@ func calculateDelayJitter() (aDelay int64, aJitter int64) {
 	for i := 0; i < samples; i++ {
 		delayEntries[i] = exchangeTimestamps()
 		log.Printf("%v\n", i)
-		//totalDelay += delayEntries[i]
 	}
 	//avgdelay := totalDelay / uint64(samples)
 	sort.Sort(int64arr(delayEntries))
-	avgdelay := (delayEntries[49] + delayEntries[59])/2
+	avgdelay := (delayEntries[49] + delayEntries[50])/2
 	totaljitter := int64(0)
 	jitter := int64(0)
 	extremes := 0
@@ -457,10 +489,38 @@ func calculateDelayJitter() (aDelay int64, aJitter int64) {
 }
 
 func main() {
-	C.setup()
-	//avgDelay, avgJitter := calculateDelayJitter()
-	calculateDelayJitter()
+	/*usb, err := openPort("/dev/ttyUSB0")
+	if err != nil {
+		fmt.Printf("Failed to open the serial port!")
+		return
+	}
+	//pin 12 and pin 15 from P9 on BBB
+	//pin 12 = gpio60
+	//pin 15 = gpio48
+	led_blue, err := os.OpenFile("/sys/class/gpio/gpio48/value", os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+	if err != nil {
+		fmt.Printf("error occured: %v\n", err)
+		return
+	}
+	led_green, err := os.OpenFile("/sys/class/gpio/gpio60/value", os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+	if err != nil {
+		fmt.Printf("error occured: %v\n", err)
+		return
+	}
+	turnOn(led_blue)
+	turnOff(led_green)
+	//avgDelay, avgJitter := calculateDelayJitter(usb)
+	//calculateDelayJitter(usb)
 	//fmt.Printf("Avg. Delay = %v ns\n", avgDelay)
 	//fmt.Printf("Avg. Jitter = %v ns\n", avgJitter)
-	//priority_test(f, avgDelay)
+	//windowSize := int64(600000000) //cycles at 1ghz is 0.6s
+	//waitTime := int64(500000000)   //cycles at 1ghz is 0.5s
+	//time.Sleep(1*time.Second)
+	//priority_test(usb, windowSize, waitTime, led_blue, led_green)
+	//usb.Close()
+	led_blue.Close()
+	led_green.Close()
+		*/
+	C.setup()
+	calculateDelayJitter()
 }
